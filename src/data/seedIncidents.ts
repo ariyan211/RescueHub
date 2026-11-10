@@ -1,7 +1,7 @@
 import type {
   Activity,
   Category,
-  Incident,
+  IncidentRecord,
   IncidentStatus,
   SafetyAnswer,
   Severity,
@@ -201,7 +201,7 @@ export function seedCoordinates(index: number) {
   };
 }
 
-export function createSeedIncidents(): Incident[] {
+export function createSeedIncidents(): IncidentRecord[] {
   return records.map((record, index) => {
     const createdAt = new Date(Date.now() - record.hoursAgo * 3_600_000).toISOString();
     const suggestion = suggestSeverity({

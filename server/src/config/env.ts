@@ -35,6 +35,16 @@ const schema = z.object({
   MEDIA_PUBLIC_BASE_URL: z.string().url().optional().or(z.literal("").transform(() => undefined)),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
   UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+
+  /** OSRM routing server. No API key. Self-host for production (public demo is fair-use only). */
+  OSRM_URL: z
+    .string()
+    .url()
+    .default("https://router.project-osrm.org")
+    .transform((v) => v.replace(/\/$/, "")),
+  OSRM_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(6000),
+  /** How often unresolved incidents are re-prioritised for waiting time. */
+  PRIORITY_REFRESH_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
 });
 
 const parsed = schema.safeParse(process.env);

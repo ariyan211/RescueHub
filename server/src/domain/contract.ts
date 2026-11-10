@@ -7,6 +7,8 @@
 import type {
   ActivityTypeLabel,
   CategoryLabel,
+  PriorityLabel,
+  TeamCategoryLabel,
   SafetyLabel,
   SeverityLabel,
   StatusLabel,
@@ -71,14 +73,87 @@ export interface IncidentDTO {
   verification: VerificationLabel;
   assignee: StaffSummary | null;
   firstResponseAt: string | null;
-  resolvedAt: string | null;
   createdAt: string;
   updatedAt: string;
   activity: ActivityDTO[];
+
+  // ---- Round 2 (same field names as the frontend Incident type) ----
+  priority: PriorityLabel;
+  priorityScore: number;
+  priorityFactors: PriorityFactorDTO[];
+  priorityUpdatedAt: string;
+  assignedTeamId?: string;
+  assignedTeam: TeamDTO | null;
+  assignments: AssignmentDTO[];
+  statusHistory: StatusChangeDTO[];
+  assignedAt?: string;
+  inProgressAt?: string;
+  resolvedAt?: string;
+}
+
+export interface PriorityFactorDTO {
+  key: "severity" | "people" | "waiting" | "category";
+  label: string;
+  points: number;
+  max: number;
+  detail: string;
+}
+
+/** Mirrors ResponseTeam in src/types/team.ts; `id` is the UUID, `code` the TEAM-### label. */
+export interface TeamDTO {
+  id: string;
+  code: string;
+  name: string;
+  category: TeamCategoryLabel;
+  latitude: number;
+  longitude: number;
+  availability: "Available" | "Busy";
+  assignedIncidentId?: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RouteInfoDTO {
+  source: "osrm" | "straight-line";
+  distanceKm: number;
+  durationMin?: number;
+}
+
+export interface AssignmentDTO {
+  id: string;
+  teamId: string;
+  teamName: string;
+  teamCategory: TeamCategoryLabel;
+  method: "recommended" | "manual";
+  assignedAt: string;
+  straightLineKm?: number;
+  route?: RouteInfoDTO;
+  releasedAt?: string;
+  releaseReason?: "resolved" | "reassigned" | "unassigned" | "incident_deleted";
+}
+
+export interface StatusChangeDTO {
+  status: StatusLabel;
+  at: string;
+  actor: string;
+}
+
+export interface TeamRecommendationDTO {
+  team: TeamDTO;
+  straightLineKm: number;
+  route: RouteInfoDTO & { geometry: [number, number][]; fallbackReason?: string };
 }
 
 /** What a citizen sees on the tracking page: no contact details, media or private notes. */
 export interface PublicIncidentDTO {
+  /** Lifecycle timestamps (Reported → Assigned → In Progress → Resolved). No team identity is disclosed. */
+  assignedAt?: string;
+  inProgressAt?: string;
+  resolvedAt?: string;
+  hasResponseTeam: boolean;
   reference: string;
   title: string;
   category: CategoryLabel;
@@ -134,6 +209,10 @@ export interface AnalyticsDTO {
   range: { from: string; to: string };
   totals: {
     total: number;
+    criticalPriorityOpen: number;
+    assigned: number;
+    availableTeams: number;
+    busyTeams: number;
     open: number;
     criticalOpen: number;
     pending: number;
@@ -150,6 +229,10 @@ export interface AnalyticsDTO {
     avgResolutionSec: number | null;
     medianResolutionSec: number | null;
   };
+  responseTeams: { avgAssignSec: number | null };
+  byPriority: { name: PriorityLabel; count: number }[];
+  teamAvailability: { name: TeamCategoryLabel; Available: number; Busy: number }[];
+  weekly: { week: string; reported: number; resolved: number }[];
   byCategory: { name: CategoryLabel; count: number }[];
   byStatus: { name: StatusLabel; value: number }[];
   bySeverity: { name: SeverityLabel; count: number }[];

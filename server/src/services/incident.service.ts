@@ -12,12 +12,21 @@ import {
 import { suggestSeverity } from "../domain/severity.js";
 import { generateTrackingCode, normalizeTrackingCode } from "../domain/trackingCode.js";
 import { badRequest, conflict, notFound } from "../lib/errors.js";
+import { publishTeams } from "./team.service.js";
 import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";
 import { headObject } from "../lib/storage.js";
 import { bus } from "../realtime/events.js";
 import type { AdminListQuery, ReportIncidentInput } from "../schemas/incident.schemas.js";
 import type { AuthUser } from "./auth.service.js";
+import {
+  lockIncident,
+  lockTeams,
+  priorityColumns,
+  refreshPriorityTx,
+  releaseTeamTx,
+  setStatusTx,
+} from "./workflowTx.js";
 
 type Tx = Prisma.TransactionClient;
 
@@ -79,6 +88,18 @@ export async function reportIncident(
   );
 
   const suggestion = suggestSeverity(input);
+  const now = new Date();
+  const { summary: prioritySummary, ...priority } = priorityColumns(
+    {
+      currentSeverity: suggestion.severity,
+      peopleAffected: input.peopleAffected,
+      category: input.category,
+      createdAt: now,
+      status: "REPORTED",
+      resolvedAt: null,
+    },
+    now,
+  );
   const contactName = input.contactName || null;
   const contactDetails = input.contactDetails || null;
 
@@ -104,7 +125,10 @@ export async function reportIncident(
           suggestedSeverity: suggestion.severity,
           currentSeverity: suggestion.severity,
           severityReason: suggestion.reason,
+          ...priority,
+          createdAt: now,
           media: { create: media },
+          statusChanges: { create: [{ toStatus: "REPORTED", changedAt: now }] },
           activity: {
             create: [
               { type: "SUBMITTED", actorType: "REPORTER", message: "Report submitted." },
@@ -112,6 +136,12 @@ export async function reportIncident(
                 type: "SEVERITY_SUGGESTED",
                 actorType: "SYSTEM",
                 message: `${E.severity.toLabel(suggestion.severity)} severity suggested. ${suggestion.reason}`,
+                isPublic: false,
+              },
+              {
+                type: "PRIORITY_CHANGED",
+                actorType: "SYSTEM",
+                message: `Priority assigned automatically. ${prioritySummary}`,
                 isPublic: false,
               },
             ],
@@ -183,6 +213,8 @@ export async function listIncidents(
     deletedAt: null,
     ...(query.status && { status: { in: query.status } }),
     ...(query.severity && { currentSeverity: { in: query.severity } }),
+    ...(query.priority && { priority: { in: query.priority } }),
+    ...(query.location && { locationText: { contains: query.location, mode: "insensitive" } }),
     ...(query.category && { category: { in: query.category } }),
     ...(query.verification && { verification: { in: query.verification } }),
     ...(query.assigneeId && {
@@ -203,12 +235,14 @@ export async function listIncidents(
   };
 
   const desc = query.sort.startsWith("-");
-  const field = query.sort.replace("-", "") as "createdAt" | "updatedAt" | "severity";
+  const field = query.sort.replace("-", "") as "createdAt" | "updatedAt" | "severity" | "priority";
   // Postgres sorts enums by declaration order (LOW..CRITICAL), so "-severity" = most severe first.
   const orderBy: Prisma.IncidentOrderByWithRelationInput[] =
     field === "severity"
       ? [{ currentSeverity: desc ? "desc" : "asc" }, { createdAt: "desc" }]
-      : [{ [field]: desc ? "desc" : "asc" }];
+      : field === "priority"
+        ? [{ priority: desc ? "desc" : "asc" }, { priorityScore: desc ? "desc" : "asc" }, { createdAt: "asc" }]
+        : [{ [field]: desc ? "desc" : "asc" }];
 
   const [total, rows] = await prisma.$transaction([
     prisma.incident.count({ where }),
@@ -251,6 +285,7 @@ interface Change {
     isPublic: boolean;
     metadata?: Prisma.InputJsonValue;
   }[];
+  priorityReason?: string;
 }
 
 /**
@@ -284,6 +319,8 @@ async function mutate(
         metadata: e.metadata,
       })),
     });
+    // Severity or other inputs may have changed: keep the stored priority current.
+    await refreshPriorityTx(tx, id, new Date(), change.priorityReason);
     return tx.incident.findUniqueOrThrow({ where: { id }, include: incidentInclude });
   });
 
@@ -292,36 +329,67 @@ async function mutate(
   return publish("updated", updated);
 }
 
-export function changeStatus(
+/**
+ * Lifecycle rules:
+ *   Assigned / In Progress  need an assigned team (assignment sets Assigned itself)
+ *   Resolved                releases the team (Busy → Available)
+ *   back to Reported/Pending unassigns the team
+ */
+export async function changeStatus(
   id: string,
   next: IncidentStatus,
   actor: AuthUser,
   note?: { text?: string; isPublic: boolean },
 ) {
-  return mutate(id, actor, (current) => {
+  const now = new Date();
+  let releasedTeam: string | null = null;
+  const updated = await prisma.$transaction(async (tx) => {
+    const current = await lockIncident(tx, id);
     if (current.status === next) return null;
-    const now = new Date();
-    const from = E.status.toLabel(current.status);
-    const to = E.status.toLabel(next);
-    const entries: Change["entries"] = [
-      {
-        type: "STATUS_CHANGED",
-        message: `Status changed from ${from} to ${to}.`,
-        isPublic: true,
-        metadata: { from: current.status, to: next },
-      },
-    ];
-    if (note?.text) entries.push({ type: "NOTE", message: note.text, isPublic: note.isPublic });
-    return {
-      data: {
-        status: next,
-        // First time a team is actively responding: drives response-time analytics.
-        ...(next === "IN_PROGRESS" && !current.firstResponseAt && { firstResponseAt: now }),
-        ...(next === "RESOLVED" ? { resolvedAt: now } : current.resolvedAt && { resolvedAt: null }),
-      },
-      entries,
-    };
+    if ((next === "ASSIGNED" || next === "IN_PROGRESS") && !current.assignedTeamId)
+      throw conflict(
+        next === "ASSIGNED"
+          ? "Assign a response team first. The status becomes Assigned automatically."
+          : "An incident can move to In Progress only after a response team is assigned.",
+      );
+    if (current.assignedTeamId && (next === "RESOLVED" || next === "REPORTED" || next === "PENDING")) {
+      await lockTeams(tx, [current.assignedTeamId]);
+      await releaseTeamTx(tx, current, next === "RESOLVED" ? "RESOLVED" : "UNASSIGNED", actor.id, now);
+      releasedTeam = current.assignedTeamId;
+    }
+    await setStatusTx(tx, current, next, actor.id, now);
+    if (note?.text)
+      await tx.incidentUpdate.create({
+        data: { incidentId: id, type: "NOTE", actorType: "STAFF", actorId: actor.id, message: note.text, isPublic: note.isPublic, createdAt: now },
+      });
+    await refreshPriorityTx(tx, id, now);
+    return tx.incident.findUniqueOrThrow({ where: { id }, include: incidentInclude });
   });
+  if (!updated) return getIncident(id);
+  logger.info({ incidentId: id, actorId: actor.id, status: next }, "incident status changed");
+  if (releasedTeam) void publishTeams([releasedTeam]);
+  return publish("updated", updated);
+}
+
+/** Waiting-time escalation job: re-scores unresolved incidents (and any never scored). */
+export async function refreshAllPriorities(now = new Date()) {
+  const rows = await prisma.incident.findMany({
+    where: { deletedAt: null, OR: [{ status: { not: "RESOLVED" } }, { priorityUpdatedAt: null }] },
+    select: { id: true, priority: true, priorityScore: true, currentSeverity: true, peopleAffected: true, category: true, createdAt: true, status: true, resolvedAt: true, priorityUpdatedAt: true },
+  });
+  let changed = 0;
+  for (const row of rows) {
+    const cols = priorityColumns(row, now);
+    if (row.priorityUpdatedAt && cols.priorityScore === row.priorityScore && cols.priority === row.priority) continue;
+    const updated = await prisma.$transaction(async (tx) => {
+      await lockIncident(tx, row.id);
+      await refreshPriorityTx(tx, row.id, now, "time since report increased");
+      return tx.incident.findUniqueOrThrow({ where: { id: row.id }, include: incidentInclude });
+    });
+    changed++;
+    if (row.priority !== updated.priority) await publish("updated", updated);
+  }
+  return changed;
 }
 
 export function changeVerification(id: string, next: Verification, actor: AuthUser) {
@@ -346,6 +414,7 @@ export function changeSeverity(id: string, next: Severity, reason: string, actor
     if (current.currentSeverity === next) return null;
     return {
       data: { currentSeverity: next, requiresReview: false },
+      priorityReason: "severity changed",
       entries: [
         {
           type: "SEVERITY_CHANGED",
@@ -392,21 +461,20 @@ export function assign(id: string, assigneeId: string | null, actor: AuthUser) {
 
 /** Soft delete: the record and its audit trail are retained. */
 export async function softDelete(id: string, actor: AuthUser) {
-  const incident = await prisma.incident.findFirst({ where: { id, deletedAt: null } });
-  if (!incident) throw notFound("Incident not found");
-  await prisma.$transaction([
-    prisma.incident.update({ where: { id }, data: { deletedAt: new Date() } }),
-    prisma.incidentUpdate.create({
-      data: {
-        incidentId: id,
-        type: "NOTE",
-        actorType: "STAFF",
-        actorId: actor.id,
-        isPublic: false,
-        message: "Incident deleted.",
-      },
-    }),
-  ]);
+  const now = new Date();
+  const incident = await prisma.$transaction(async (tx) => {
+    const current = await lockIncident(tx, id);
+    if (current.assignedTeamId) {
+      await lockTeams(tx, [current.assignedTeamId]);
+      await releaseTeamTx(tx, current, "INCIDENT_DELETED", actor.id, now);
+    }
+    await tx.incident.update({ where: { id }, data: { deletedAt: now } });
+    await tx.incidentUpdate.create({
+      data: { incidentId: id, type: "NOTE", actorType: "STAFF", actorId: actor.id, isPublic: false, message: "Incident deleted.", createdAt: now },
+    });
+    return current;
+  });
+  if (incident.assignedTeamId) void publishTeams([incident.assignedTeamId]);
   logger.warn({ incidentId: id, actorId: actor.id }, "incident deleted");
   bus.emit("incident:deleted", { id, reference: incident.trackingCode });
 }

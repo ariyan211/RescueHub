@@ -1,161 +1,110 @@
+/**
+ * Browser persistence for the demo (localStorage). Business rules live in
+ * ../domain/workflow.ts; this module only loads, migrates and saves state.
+ *
+ * v1 (Round 1): { incidents }            key responsehub.incidents.v1
+ * v2 (Round 2): { incidents, teams }     key responsehub.state.v2
+ * v1 data is migrated forward on first load and left in place untouched.
+ */
 import { createSeedIncidents, seedCoordinates } from "../data/seedIncidents";
-import type {
-  Activity,
-  Incident,
-  IncidentStatus,
-  NewIncidentInput,
-  Severity,
-  Verification,
-} from "../types/incident";
-import { suggestSeverity } from "../utils/severity";
+import { attachSeedOperations, createSeedTeams } from "../data/seedTeams";
+import {
+  findInconsistencies,
+  normalizeIncident,
+  repairState,
+  type AppState,
+} from "../domain/workflow";
+import type { IncidentRecord } from "../types/incident";
 
-const STORAGE_KEY = "responsehub.incidents.v1";
-const VERSION = 1;
+export const STORAGE_KEY = "responsehub.state.v2";
+const LEGACY_KEY = "responsehub.incidents.v1";
+const VERSION = 2;
 
-interface Store {
-  version: number;
+interface StoreV2 extends AppState {
+  version: 2;
   initialized: true;
-  incidents: Incident[];
 }
 
-function saveStore(incidents: Incident[]) {
+function save(state: AppState) {
   localStorage.setItem(
     STORAGE_KEY,
-    JSON.stringify({ version: VERSION, initialized: true, incidents } satisfies Store),
+    JSON.stringify({ version: VERSION, initialized: true, ...state } satisfies StoreV2),
   );
 }
 
 // Older saved demo incidents predate map coordinates; add the fictional ones.
-function withSeedCoordinates(incident: Incident): Incident {
+function withSeedCoordinates<T extends IncidentRecord>(incident: T): T {
   const match = /^demo-(\d+)$/.exec(incident.id);
   if (!match || incident.coordinates) return incident;
   return { ...incident, coordinates: seedCoordinates(Number(match[1]) - 1) };
 }
 
-export function loadIncidents(): Incident[] {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    const seeded = createSeedIncidents();
-    saveStore(seeded);
-    return seeded;
-  }
+export function createDemoState(now = new Date()): AppState {
+  const incidents = createSeedIncidents().map((r) => normalizeIncident(r, now));
+  return attachSeedOperations(incidents, createSeedTeams(now), now);
+}
+
+function migrateV1(raw: string, now: Date): AppState | null {
   try {
-    const parsed = JSON.parse(raw) as Store;
-    if (
-      parsed.version !== VERSION ||
-      parsed.initialized !== true ||
-      !Array.isArray(parsed.incidents)
-    )
-      throw new Error("Invalid store");
-    return parsed.incidents.map(withSeedCoordinates);
+    const parsed = JSON.parse(raw) as { version: number; incidents: IncidentRecord[] };
+    if (parsed.version !== 1 || !Array.isArray(parsed.incidents)) return null;
+    // Keep every Round 1 report; add priority/lifecycle fields and the demo teams.
+    return {
+      incidents: parsed.incidents.map((r) => normalizeIncident(withSeedCoordinates(r), now)),
+      teams: createSeedTeams(now),
+    };
   } catch {
-    const seeded = createSeedIncidents();
-    saveStore(seeded);
-    return seeded;
+    return null;
   }
 }
 
-export function persistIncidents(incidents: Incident[]): boolean {
+/** Parses saved state, or returns null if missing/corrupt. */
+export function readState(now = new Date()): AppState | null {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return null;
   try {
-    saveStore(incidents);
+    const parsed = JSON.parse(raw) as StoreV2;
+    if (
+      parsed.version !== VERSION ||
+      parsed.initialized !== true ||
+      !Array.isArray(parsed.incidents) ||
+      !Array.isArray(parsed.teams)
+    )
+      return null;
+    const state: AppState = {
+      incidents: parsed.incidents.map((i) => normalizeIncident(withSeedCoordinates(i), now)),
+      teams: parsed.teams,
+    };
+    return findInconsistencies(state).length ? repairState(state) : state;
+  } catch {
+    return null;
+  }
+}
+
+export function loadState(now = new Date()): AppState {
+  const current = readState(now);
+  if (current) return current;
+  const legacy = localStorage.getItem(LEGACY_KEY);
+  const state = (legacy && migrateV1(legacy, now)) || createDemoState(now);
+  try {
+    save(state);
+  } catch {
+    /* storage unavailable: run in memory */
+  }
+  return state;
+}
+
+export function persistState(state: AppState): boolean {
+  try {
+    save(state);
     return true;
   } catch {
     return false; // storage full or unavailable
   }
 }
 
-function uid() {
-  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-export function createIncident(input: NewIncidentInput): Incident {
-  const now = new Date().toISOString();
-  const suggestion = suggestSeverity(input);
-  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return {
-    ...input,
-    id: uid(),
-    reference: `RH-${new Date().getFullYear()}-${suffix}`,
-    suggestedSeverity: suggestion.severity,
-    currentSeverity: suggestion.severity,
-    severityReason: suggestion.reason,
-    requiresReview: true,
-    status: "Reported",
-    verification: "Unverified",
-    createdAt: now,
-    updatedAt: now,
-    activity: [
-      {
-        id: uid(),
-        type: "submitted",
-        message: "Report submitted.",
-        actor: "Reporter",
-        timestamp: now,
-      },
-      {
-        id: uid(),
-        type: "severity_suggested",
-        message: `${suggestion.severity} severity suggested. ${suggestion.reason}`,
-        actor: "System",
-        timestamp: now,
-      },
-    ],
-  };
-}
-
-export function activity(type: Activity["type"], message: string): Activity {
-  return {
-    id: uid(),
-    type,
-    message,
-    actor: "Demo administrator",
-    timestamp: new Date().toISOString(),
-  };
-}
-
-export function updateStatus(incident: Incident, status: IncidentStatus): Incident {
-  const event = activity("status_changed", `Status changed from ${incident.status} to ${status}.`);
-  return {
-    ...incident,
-    status,
-    updatedAt: event.timestamp,
-    activity: [...incident.activity, event],
-  };
-}
-
-export function updateVerification(incident: Incident, verification: Verification): Incident {
-  const event = activity(
-    "verification_changed",
-    `Verification changed from ${incident.verification} to ${verification}.`,
-  );
-  return {
-    ...incident,
-    verification,
-    updatedAt: event.timestamp,
-    activity: [...incident.activity, event],
-  };
-}
-
-export function updateSeverity(incident: Incident, severity: Severity, reason: string): Incident {
-  const event = activity(
-    "severity_changed",
-    `Severity changed from ${incident.currentSeverity} to ${severity}. Reason: ${reason}`,
-  );
-  return {
-    ...incident,
-    currentSeverity: severity,
-    updatedAt: event.timestamp,
-    activity: [...incident.activity, event],
-  };
-}
-
-export function addNote(incident: Incident, note: string): Incident {
-  const event = activity("note", note);
-  return { ...incident, updatedAt: event.timestamp, activity: [...incident.activity, event] };
-}
-
-export function resetDemoData() {
-  const seeded = createSeedIncidents();
-  saveStore(seeded);
-  return seeded;
+export function resetDemoState(): AppState {
+  const state = createDemoState();
+  persistState(state);
+  return state;
 }

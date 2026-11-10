@@ -6,8 +6,10 @@ import HotspotsPage from "../pages/HotspotsPage";
 import HomePage from "../pages/HomePage";
 import IncidentDetailPage from "../pages/IncidentDetailPage";
 import IncidentListPage from "../pages/IncidentListPage";
+import LiveMapPage from "../pages/LiveMapPage";
 import NotFoundPage from "../pages/NotFoundPage";
 import ReportPage from "../pages/ReportPage";
+import TeamsPage from "../pages/TeamsPage";
 import TrackPage from "../pages/TrackPage";
 
 export const router = createBrowserRouter([
@@ -27,6 +29,8 @@ export const router = createBrowserRouter([
       { index: true, Component: DashboardPage },
       { path: "incidents", Component: IncidentListPage },
       { path: "incidents/:id", Component: IncidentDetailPage },
+      { path: "teams", Component: TeamsPage },
+      { path: "map", Component: LiveMapPage },
     ],
   },
   { path: "*", Component: NotFoundPage },

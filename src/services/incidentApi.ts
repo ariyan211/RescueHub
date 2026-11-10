@@ -12,6 +12,8 @@
  *   incidentService.addNote(incident, note)      → addNote(id, note)
  *   (TrackPage lookup)                           → trackIncident(reference)
  *   (computeHotspots)                            → getHotspots(query)
+ *   workflow.assignTeam / unassignTeam           → assignTeam / unassignTeam
+ *   workflow.addTeam / updateTeam / deleteTeam   → createTeam / updateTeam / deleteTeam
  *
  * Configure with VITE_API_URL (e.g. http://localhost:4000).
  */
@@ -21,6 +23,8 @@ import type {
   ApiErrorBody,
   ApiHotspot,
   ApiIncident,
+  ApiTeam,
+  RecommendationResult,
   AuthUser,
   HotspotQuery,
   MapIncident,
@@ -28,9 +32,12 @@ import type {
   PublicIncident,
   PublicSummary,
   StaffSummary,
+  TeamRecommendation,
 } from "../types/api";
+import type { Availability, TeamCategory, TeamInput } from "../types/team";
 import type {
   Category,
+  Priority,
   IncidentStatus,
   NewIncidentInput,
   Severity,
@@ -87,7 +94,7 @@ function toQueryString(query?: Query) {
 }
 
 async function request<T>(
-  method: "GET" | "POST" | "PATCH" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   options: { body?: unknown; query?: Query; headers?: Record<string, string>; signal?: AbortSignal } = {},
 ): Promise<T> {
@@ -284,8 +291,67 @@ export function deleteIncident(id: string): Promise<void> {
   return request("DELETE", `/admin/incidents/${id}`);
 }
 
-export function getAnalytics(range: { from?: string; to?: string } = {}): Promise<Analytics> {
-  return data(request("GET", "/admin/analytics", { query: range }));
+export function getAnalytics(
+  filters: {
+    from?: string;
+    to?: string;
+    category?: Category[];
+    priority?: Priority[];
+    status?: IncidentStatus[];
+    location?: string;
+  } = {},
+): Promise<Analytics> {
+  return data(request("GET", "/admin/analytics", { query: filters }));
+}
+
+// ---------------------------------------------------------------------------
+// Response teams & location-based assignment
+// ---------------------------------------------------------------------------
+
+export function listTeams(
+  filters: { q?: string; category?: TeamCategory[]; availability?: Availability[] } = {},
+): Promise<ApiTeam[]> {
+  return data(request("GET", "/admin/teams", { query: filters }));
+}
+
+export function createTeam(input: TeamInput): Promise<ApiTeam> {
+  return data(request("POST", "/admin/teams", { body: input }));
+}
+
+export function updateTeam(id: string, input: TeamInput): Promise<ApiTeam> {
+  return data(request("PUT", `/admin/teams/${id}`, { body: input }));
+}
+
+export function setTeamAvailability(id: string, availability: Availability): Promise<ApiTeam> {
+  return data(request("PATCH", `/admin/teams/${id}/availability`, { body: { availability } }));
+}
+
+export function deleteTeam(id: string): Promise<void> {
+  return request("DELETE", `/admin/teams/${id}`);
+}
+
+/** Nearest suitable available teams, ranked by OSRM drive time (or straight-line if routing is down). */
+export function getRecommendations(incidentId: string): Promise<RecommendationResult> {
+  return data(request("GET", `/admin/incidents/${incidentId}/recommendations`));
+}
+
+/** 409 when the team became busy meanwhile; 400 when the category needs overrideCategory. */
+export function assignTeam(
+  incidentId: string,
+  teamId: string,
+  options: { method: "recommended" | "manual"; overrideCategory?: boolean },
+): Promise<ApiIncident> {
+  return data(request("POST", `/admin/incidents/${incidentId}/assignments`, { body: { teamId, ...options } }));
+}
+
+export function unassignTeam(incidentId: string): Promise<ApiIncident> {
+  return data(request("DELETE", `/admin/incidents/${incidentId}/assignments/current`));
+}
+
+export function getActiveRoute(incidentId: string): Promise<
+  (TeamRecommendation["route"] & { teamId: string }) | null
+> {
+  return data(request("GET", `/admin/incidents/${incidentId}/route`));
 }
 
 export function listStaff(): Promise<(StaffSummary & { email: string })[]> {

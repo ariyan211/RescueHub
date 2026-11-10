@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { ActivityDTO, IncidentDTO, PublicIncidentDTO } from "../domain/contract.js";
+import type { ActivityDTO, IncidentDTO, PublicIncidentDTO, TeamDTO } from "../domain/contract.js";
 
 /**
  * In-process domain event bus. Services publish here after a transaction
@@ -19,6 +19,8 @@ export interface IncidentEvents {
     },
   ];
   "incident:deleted": [{ id: string; reference: string }];
+  /** Team created, edited, (un)assigned, availability changed or deleted. */
+  "team:updated": [{ team: TeamDTO; deleted: boolean }];
 }
 
 class TypedBus extends EventEmitter<IncidentEvents> {}

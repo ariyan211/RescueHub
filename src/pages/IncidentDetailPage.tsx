@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   Clock3,
@@ -10,8 +11,11 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { IncidentMap } from "../components/incidents/IncidentMap";
-import { Badge } from "../components/ui/Badge";
+import { LifecycleTracker } from "../components/incidents/LifecycleTracker";
+import { PriorityPanel } from "../components/incidents/PriorityPanel";
+import { OperationsMap, type PreviewRoute } from "../components/map/OperationsMap";
+import { TeamAssignmentPanel } from "../components/teams/TeamAssignmentPanel";
+import { Badge, PriorityBadge } from "../components/ui/Badge";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useIncidents } from "../hooks/useIncidents";
 import { SEVERITIES, STATUSES, VERIFICATIONS, type Severity } from "../types/incident";
@@ -22,6 +26,7 @@ export default function IncidentDetailPage() {
   const navigate = useNavigate();
   const {
     incidents,
+    teams,
     changeStatus,
     changeVerification,
     changeSeverity,
@@ -36,11 +41,14 @@ export default function IncidentDetailPage() {
   const [photoView, setPhotoView] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const [toastError, setToastError] = useState(false);
+  const [preview, setPreview] = useState<PreviewRoute | null>(null);
   useEffect(() => {
     if (incident) setSeverity(incident.currentSeverity);
   }, [incident?.id, incident?.currentSeverity]);
-  function showToast(message: string) {
+  function showToast(message: string, error = false) {
     setToast(message);
+    setToastError(error);
     window.setTimeout(() => setToast(""), 2600);
   }
   if (!incident)
@@ -78,7 +86,11 @@ export default function IncidentDetailPage() {
           role="status"
           className="fixed right-4 top-22 z-40 flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-xl"
         >
-          <CheckCircle2 size={17} className="text-emerald-400" />
+          {toastError ? (
+            <AlertTriangle size={17} className="text-amber-400" />
+          ) : (
+            <CheckCircle2 size={17} className="text-emerald-400" />
+          )}
           {toast}
         </div>
       )}
@@ -90,7 +102,7 @@ export default function IncidentDetailPage() {
         All incidents
       </Link>
       <header
-        className={`rounded-2xl border bg-white p-6 shadow-sm ${incident.currentSeverity === "Critical" ? "border-red-200" : "border-slate-200"}`}
+        className={`rounded-2xl border bg-white p-6 shadow-sm ${incident.priority === "Critical" && incident.status !== "Resolved" ? "border-l-4 border-red-300 border-l-red-500" : incident.currentSeverity === "Critical" ? "border-red-200" : "border-slate-200"}`}
       >
         <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
           <div>
@@ -105,6 +117,11 @@ export default function IncidentDetailPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <PriorityBadge
+              value={incident.priority}
+              score={incident.priorityScore}
+              title={`Priority score ${incident.priorityScore}/100`}
+            />
             <Badge value={incident.currentSeverity} />
             <Badge value={incident.status} />
             <Badge value={incident.verification} />
@@ -113,6 +130,29 @@ export default function IncidentDetailPage() {
       </header>
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.3fr_.7fr]">
         <div className="space-y-5">
+          <section className="card">
+            <h2 className="text-lg font-bold">Incident lifecycle</h2>
+            <p className="mb-5 mt-1 text-sm text-slate-500">
+              Reported → Assigned → In Progress → Resolved. Each stage records when it was
+              reached.
+            </p>
+            <LifecycleTracker incident={incident} />
+            {incident.statusHistory.length > 0 && (
+              <details className="mt-5 text-sm">
+                <summary className="cursor-pointer font-bold text-blue-700">
+                  Status history ({incident.statusHistory.length})
+                </summary>
+                <ol className="mt-3 space-y-1.5 text-slate-600">
+                  {[...incident.statusHistory].reverse().map((h, i) => (
+                    <li key={`${h.at}-${i}`}>
+                      <span className="font-semibold text-slate-800">{h.status}</span> ·{" "}
+                      {formatDate(h.at)} · {h.actor}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
+          </section>
           <section className="card">
             <h2 className="text-lg font-bold">Full report details</h2>
             <dl className="detail-grid mt-6">
@@ -183,13 +223,22 @@ export default function IncidentDetailPage() {
               required.
             </p>
           </section>
+          <PriorityPanel incident={incident} />
           {incident.coordinates && (
             <section className="card">
               <h2 className="text-lg font-bold">Map location</h2>
               <p className="mb-4 mt-1 text-sm text-slate-500">
-                Plotted from submitted coordinates, not a resolved street address.
+                Plotted from submitted coordinates, not a resolved street address. Response teams
+                are shown with the route of the assigned or proposed team.
               </p>
-              <IncidentMap incidents={[incident]} height={280} />
+              <OperationsMap
+                incidents={[incident]}
+                teams={teams}
+                height={340}
+                focusIncidentId={incident.id}
+                preview={preview}
+                onSelectTeam={() => navigate("/admin/teams")}
+              />
             </section>
           )}
           <section className="card">
@@ -264,6 +313,11 @@ export default function IncidentDetailPage() {
           </section>
         </div>
         <aside className="space-y-5">
+          <TeamAssignmentPanel
+            incident={incident}
+            onPreview={setPreview}
+            onDone={(message) => showToast(message)}
+          />
           <section className="card">
             <h2 className="text-lg font-bold">Administrative updates</h2>
             <div className="mt-5 space-y-5">
@@ -276,16 +330,25 @@ export default function IncidentDetailPage() {
                   className="input"
                   value={incident.status}
                   onChange={(e) => {
-                    changeStatus(incident.id, e.target.value as typeof incident.status);
-                    showToast("Status updated");
+                    const result = changeStatus(incident.id, e.target.value as typeof incident.status);
+                    if (result.ok) showToast("Status updated");
+                    else showToast(result.error, true);
                   }}
                 >
                   {STATUSES.map((value) => (
-                    <option key={value}>{value}</option>
+                    <option
+                      key={value}
+                      disabled={
+                        (value === "Assigned" || value === "In Progress") && !incident.assignedTeamId
+                      }
+                    >
+                      {value}
+                    </option>
                   ))}
                 </select>
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  Changing status records an administrative update. It does not dispatch responders.
+                  Assigned and In Progress need a response team (assign one above). Resolving releases
+                  the team; moving back to Reported or Pending unassigns it.
                 </p>
               </div>
               <div>
@@ -412,7 +475,7 @@ export default function IncidentDetailPage() {
       <ConfirmDialog
         open={deleteOpen}
         title="Delete this report?"
-        description={`This permanently removes ${incident.reference} from this browser demo. This action cannot be undone.`}
+        description={`This permanently removes ${incident.reference} from this browser demo${incident.assignedTeamId ? " and releases its assigned team" : ""}. This action cannot be undone.`}
         confirmLabel="Delete report"
         danger
         onCancel={() => setDeleteOpen(false)}

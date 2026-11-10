@@ -97,15 +97,18 @@ export const adminListQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
   status: csv(labelEnum(E.status)).optional(),
   severity: csv(labelEnum(E.severity)).optional(),
+  priority: csv(labelEnum(E.priority)).optional(),
   category: csv(labelEnum(E.category)).optional(),
+  /** Case-insensitive match on the location description. */
+  location: z.string().trim().max(200).optional(),
   verification: csv(labelEnum(E.verification)).optional(),
   assigneeId: z.union([z.string().uuid(), z.literal("me"), z.literal("unassigned")]).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   q: z.string().trim().max(200).optional(),
   sort: z
-    .enum(["createdAt", "-createdAt", "updatedAt", "-updatedAt", "severity", "-severity"])
-    .default("-createdAt"),
+    .enum(["createdAt", "-createdAt", "updatedAt", "-updatedAt", "severity", "-severity", "priority", "-priority"])
+    .default("-priority"),
 });
 export type AdminListQuery = z.infer<typeof adminListQuerySchema>;
 
@@ -135,4 +138,42 @@ export const assignSchema = z.object({ assigneeId: z.string().uuid().nullable() 
 export const analyticsQuerySchema = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  category: csv(labelEnum(E.category)).optional(),
+  priority: csv(labelEnum(E.priority)).optional(),
+  status: csv(labelEnum(E.status)).optional(),
+  location: z.string().trim().max(200).optional(),
 });
+export type AnalyticsQuery = z.infer<typeof analyticsQuerySchema>;
+
+// ---------- Response teams & assignment ----------
+
+const PHONE = /^\+?[\d\s()-]{6,20}$/;
+
+export const teamInputSchema = z
+  .object({
+    name: z.string().trim().min(2).max(80),
+    category: labelEnum(E.teamCategory),
+    latitude: z.coerce.number().min(-90).max(90),
+    longitude: z.coerce.number().min(-180).max(180),
+    contactName: z.string().trim().min(1).max(120),
+    contactPhone: z.string().trim().regex(PHONE, "Enter a phone number (digits, spaces, +, - or brackets)"),
+    contactEmail: z.union([z.string().trim().email().max(200), z.literal("")]).optional(),
+  })
+  .strict();
+
+export const teamListQuerySchema = z.object({
+  q: z.string().trim().max(100).optional(),
+  category: csv(labelEnum(E.teamCategory)).optional(),
+  availability: csv(labelEnum(E.availability)).optional(),
+});
+
+export const availabilitySchema = z.object({ availability: labelEnum(E.availability) }).strict();
+
+export const assignTeamSchema = z
+  .object({
+    teamId: z.string().uuid(),
+    method: z.enum(["recommended", "manual"]).transform((m) => E.assignmentMethod.toDb(m)),
+    /** Mutual aid: allow a team whose category is not a standard match. */
+    overrideCategory: z.boolean().default(false),
+  })
+  .strict();

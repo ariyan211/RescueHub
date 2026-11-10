@@ -1,10 +1,10 @@
 import L from "leaflet";
-import "leaflet/dist/leaflet.css";
 import "leaflet.markercluster";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import { useEffect, useRef } from "react";
 import type { Incident } from "../../types/incident";
+import { basemaps, dotIcon as icon, fullscreenControl } from "../map/leafletShared";
 
 const severityColors: Record<string, string> = {
   Low: "#059669",
@@ -15,62 +15,10 @@ const severityColors: Record<string, string> = {
 const statusColors: Record<string, string> = {
   Reported: "#64748b",
   Pending: "#d97706",
+  Assigned: "#4f46e5",
   "In Progress": "#2563eb",
   Resolved: "#059669",
 };
-
-const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
-
-function basemaps(maxZoom: number): Record<string, L.TileLayer> {
-  return {
-    Street: L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom,
-      attribution: OSM,
-    }),
-    Topographic: L.tileLayer("https://tile.opentopomap.org/{z}/{x}/{y}.png", {
-      maxZoom: Math.min(maxZoom, 17),
-      attribution: `${OSM}, SRTM | &copy; <a href="https://opentopomap.org">OpenTopoMap</a>`,
-    }),
-    Satellite: L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: Math.min(maxZoom, 18), attribution: "Tiles &copy; Esri" },
-    ),
-  };
-}
-
-function fullscreenControl() {
-  const Control = L.Control.extend({
-    onAdd(map: L.Map) {
-      const button = L.DomUtil.create("button", "leaflet-bar") as HTMLButtonElement;
-      button.type = "button";
-      button.setAttribute("aria-label", "Toggle fullscreen map");
-      button.title = "Toggle fullscreen";
-      button.textContent = "⛶";
-      button.style.cssText =
-        "width:34px;height:34px;background:#fff;font-size:18px;line-height:1;border-radius:4px;border:2px solid rgba(0,0,0,.2);cursor:pointer";
-      L.DomEvent.disableClickPropagation(button);
-      button.addEventListener("click", () => {
-        const el = map.getContainer();
-        if (document.fullscreenElement) void document.exitFullscreen();
-        else void el.requestFullscreen?.();
-      });
-      const refresh = () => setTimeout(() => map.invalidateSize(), 150);
-      document.addEventListener("fullscreenchange", refresh);
-      map.on("unload", () => document.removeEventListener("fullscreenchange", refresh));
-      return button;
-    },
-  });
-  return new Control({ position: "topleft" });
-}
-
-function icon(color: string) {
-  return L.divIcon({
-    className: "",
-    iconSize: [26, 26],
-    iconAnchor: [13, 13],
-    html: `<span style="display:block;width:26px;height:26px;border-radius:9999px;background:${color};border:3px solid #fff;box-shadow:0 1px 4px rgba(15,23,42,.45)"></span>`,
-  });
-}
 
 /**
  * publicMode: for the public site. Markers are colored by status, positions are rounded to

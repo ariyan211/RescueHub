@@ -3,12 +3,15 @@
  * Every API incident is a superset of `Incident` from ./incident, so existing
  * components can render API data unchanged.
  */
+import type { ResponseTeam } from "./team";
 import type {
   Activity,
   Category,
   Coordinates,
   Incident,
   IncidentStatus,
+  Priority,
+  RouteInfo,
   Severity,
   Verification,
 } from "./incident";
@@ -34,14 +37,32 @@ export interface StaffSummary {
   role: StaffRole;
 }
 
-/** Full incident for the staff console. */
+/** Response team from the API: `id` is the UUID, `code` the TEAM-### label. */
+export interface ApiTeam extends ResponseTeam {
+  code: string;
+}
+
+/** Full incident for the staff console (superset of the frontend Incident). */
 export interface ApiIncident extends Omit<Incident, "activity"> {
   media: ApiMedia[];
   isAnonymous: boolean;
   assignee: StaffSummary | null;
   firstResponseAt: string | null;
-  resolvedAt: string | null;
+  assignedTeam: ApiTeam | null;
   activity: ApiActivity[];
+}
+
+export interface TeamRecommendation {
+  team: ApiTeam;
+  straightLineKm: number;
+  route: RouteInfo & { geometry: [number, number][]; fallbackReason?: string };
+}
+
+export interface RecommendationResult {
+  /** "road-duration" = ranked by OSRM drive time; "straight-line" = OSRM unavailable. */
+  basis: "road-duration" | "straight-line" | "none";
+  reason?: string;
+  recommendations: TeamRecommendation[];
 }
 
 /** Redacted view returned by the public tracking endpoint. */
@@ -58,7 +79,11 @@ export interface PublicIncident
     | "verification"
     | "createdAt"
     | "updatedAt"
+    | "assignedAt"
+    | "inProgressAt"
+    | "resolvedAt"
   > {
+  hasResponseTeam: boolean;
   activity: ApiActivity[];
 }
 
@@ -101,6 +126,10 @@ export interface Analytics {
   range: { from: string; to: string };
   totals: {
     total: number;
+    criticalPriorityOpen: number;
+    assigned: number;
+    availableTeams: number;
+    busyTeams: number;
     open: number;
     criticalOpen: number;
     pending: number;
@@ -115,6 +144,10 @@ export interface Analytics {
     avgResolutionSec: number | null;
     medianResolutionSec: number | null;
   };
+  responseTeams: { avgAssignSec: number | null };
+  byPriority: { name: Priority; count: number }[];
+  teamAvailability: { name: string; Available: number; Busy: number }[];
+  weekly: { week: string; reported: number; resolved: number }[];
   byCategory: { name: Category; count: number }[];
   byStatus: { name: IncidentStatus; value: number }[];
   bySeverity: { name: Severity; count: number }[];
@@ -141,13 +174,15 @@ export interface AdminIncidentFilters {
   pageSize?: number;
   status?: IncidentStatus[];
   severity?: Severity[];
+  priority?: Priority[];
+  location?: string;
   category?: Category[];
   verification?: Verification[];
   assigneeId?: string | "me" | "unassigned";
   from?: string;
   to?: string;
   q?: string;
-  sort?: "createdAt" | "-createdAt" | "updatedAt" | "-updatedAt" | "severity" | "-severity";
+  sort?: "createdAt" | "-createdAt" | "updatedAt" | "-updatedAt" | "severity" | "-severity" | "priority" | "-priority";
 }
 
 export interface HotspotQuery {

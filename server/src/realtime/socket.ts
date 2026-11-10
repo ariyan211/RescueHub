@@ -2,7 +2,7 @@ import type { Server as HttpServer } from "node:http";
 import { Server, type Socket } from "socket.io";
 import type { Role } from "@prisma/client";
 import { env } from "../config/env.js";
-import type { IncidentDTO, PublicIncidentDTO, ActivityDTO } from "../domain/contract.js";
+import type { IncidentDTO, PublicIncidentDTO, ActivityDTO, TeamDTO } from "../domain/contract.js";
 import { logger } from "../lib/logger.js";
 import { STAFF } from "../middleware/auth.js";
 import { verifyToken, type AuthUser } from "../services/auth.service.js";
@@ -22,6 +22,7 @@ import { bus } from "./events.js";
  *   incident:created  staff:  { incident: IncidentDTO }
  *   incident:updated  staff:  { incident: IncidentDTO, change }   track: { incident: PublicIncidentDTO, change }
  *   incident:deleted  staff:  { id }
+ *   team:updated      staff:  { team, deleted }   (map markers, availability)
  */
 export interface ServerToClientEvents {
   "incident:created": (payload: { incident: IncidentDTO }) => void;
@@ -30,6 +31,7 @@ export interface ServerToClientEvents {
     change: ActivityDTO | null;
   }) => void;
   "incident:deleted": (payload: { id: string }) => void;
+  "team:updated": (payload: { team: TeamDTO; deleted: boolean }) => void;
 }
 
 type Ack = (res: { ok: true; trackingCode: string } | { ok: false; error: string }) => void;
@@ -116,6 +118,9 @@ export function createRealtime(httpServer: HttpServer) {
   });
   bus.on("incident:deleted", ({ id }) => {
     io.to("staff").emit("incident:deleted", { id });
+  });
+  bus.on("team:updated", (payload) => {
+    io.to("staff").emit("team:updated", payload);
   });
 
   return io;

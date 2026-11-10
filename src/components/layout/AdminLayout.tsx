@@ -1,10 +1,21 @@
-import { ArrowLeft, ClipboardList, LayoutDashboard, Menu, ShieldCheck, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ClipboardList,
+  LayoutDashboard,
+  Map as MapIcon,
+  Menu,
+  ShieldCheck,
+  UsersRound,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
 
 const links = [
   { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/admin/incidents", label: "Incidents", icon: ClipboardList, end: false },
+  { to: "/admin/teams", label: "Response teams", icon: UsersRound, end: false },
+  { to: "/admin/map", label: "Live map", icon: MapIcon, end: false },
 ];
 
 export default function AdminLayout() {
@@ -15,7 +26,11 @@ export default function AdminLayout() {
       ? "Overview"
       : location.pathname === "/admin/incidents"
         ? "Incidents"
-        : "Incident details";
+        : location.pathname === "/admin/teams"
+          ? "Response teams"
+          : location.pathname === "/admin/map"
+            ? "Live map"
+            : "Incident details";
   const sidebar = (
     <div className="flex h-full flex-col">
       <Link to="/" className="flex items-center gap-3 px-5 py-6 text-lg font-extrabold text-white">

@@ -1,5 +1,10 @@
 import type {
   ActivityType,
+  AssignmentMethod,
+  Priority,
+  ReleaseReason,
+  TeamAvailability,
+  TeamCategory,
   IncidentCategory,
   IncidentStatus,
   SafetyAnswer,
@@ -40,6 +45,7 @@ export const severity = bimap({
 export const status = bimap({
   REPORTED: "Reported",
   PENDING: "Pending",
+  ASSIGNED: "Assigned",
   IN_PROGRESS: "In Progress",
   RESOLVED: "Resolved",
 } as const satisfies Record<IncidentStatus, string>);
@@ -62,10 +68,46 @@ export const activityType = bimap({
   SEVERITY_CHANGED: "severity_changed",
   VERIFICATION_CHANGED: "verification_changed",
   STATUS_CHANGED: "status_changed",
+  PRIORITY_CHANGED: "priority_changed",
   ASSIGNED: "assigned",
+  TEAM_RELEASED: "team_released",
   NOTE: "note",
 } as const satisfies Record<ActivityType, string>);
 
+export const priority = bimap({
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  CRITICAL: "Critical",
+} as const satisfies Record<Priority, string>);
+
+export const teamCategory = bimap({
+  FIRE: "Fire",
+  MEDICAL: "Medical",
+  RESCUE: "Rescue",
+  POLICE: "Police",
+  DISASTER_RELIEF: "Disaster Relief",
+} as const satisfies Record<TeamCategory, string>);
+
+export const availability = bimap({
+  AVAILABLE: "Available",
+  BUSY: "Busy",
+} as const satisfies Record<TeamAvailability, string>);
+
+export const assignmentMethod = bimap({
+  RECOMMENDED: "recommended",
+  MANUAL: "manual",
+} as const satisfies Record<AssignmentMethod, string>);
+
+export const releaseReason = bimap({
+  RESOLVED: "resolved",
+  REASSIGNED: "reassigned",
+  UNASSIGNED: "unassigned",
+  INCIDENT_DELETED: "incident_deleted",
+} as const satisfies Record<ReleaseReason, string>);
+
+export type PriorityLabel = ReturnType<typeof priority.toLabel>;
+export type TeamCategoryLabel = ReturnType<typeof teamCategory.toLabel>;
 export type CategoryLabel = ReturnType<typeof category.toLabel>;
 export type SeverityLabel = ReturnType<typeof severity.toLabel>;
 export type StatusLabel = ReturnType<typeof status.toLabel>;

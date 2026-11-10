@@ -1,6 +1,7 @@
 import { Clock3, Info, Search, ShieldAlert } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router";
+import { LifecycleTracker } from "../components/incidents/LifecycleTracker";
 import { Badge } from "../components/ui/Badge";
 import { useIncidents } from "../hooks/useIncidents";
 import { formatDate } from "../utils/dateFormat";
@@ -102,6 +103,15 @@ export default function TrackPage() {
                 <dd>{formatDate(incident.updatedAt)}</dd>
               </div>
             </dl>
+            <div className="mt-6 border-t border-slate-100 pt-6">
+              <h3 className="mb-4 text-sm font-bold text-slate-800">Progress</h3>
+              <LifecycleTracker incident={incident} />
+              {incident.assignedTeamId && (
+                <p className="mt-4 rounded-xl bg-indigo-50 p-3 text-sm font-semibold text-indigo-900">
+                  A response team has been assigned to this report.
+                </p>
+              )}
+            </div>
           </section>
         )}
         <p className="mt-6 text-center text-xs leading-5 text-slate-500">

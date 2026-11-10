@@ -1,7 +1,18 @@
-import type { Incident, IncidentMedia, IncidentUpdate, Prisma, User } from "@prisma/client";
+import type {
+  Incident,
+  IncidentMedia,
+  IncidentUpdate,
+  Prisma,
+  ResponseTeam,
+  TeamAssignment,
+  User,
+} from "@prisma/client";
 import { mediaUrl } from "../lib/storage.js";
 import type {
   ActivityDTO,
+  AssignmentDTO,
+  PriorityFactorDTO,
+  TeamDTO,
   IncidentDTO,
   MediaDTO,
   PublicIncidentDTO,
@@ -16,7 +27,52 @@ export const incidentInclude = {
   media: { orderBy: { uploadedAt: "asc" } },
   activity: { orderBy: { createdAt: "asc" }, include: { actor: actorSelect } },
   assignee: actorSelect,
+  assignedTeam: true,
+  assignments: { orderBy: { assignedAt: "asc" }, include: { team: { select: { name: true, category: true } } } },
+  statusChanges: { orderBy: { changedAt: "asc" }, include: { actor: { select: { name: true } } } },
 } satisfies Prisma.IncidentInclude;
+
+export function toTeamDTO(t: ResponseTeam & { activeIncident?: { id: string } | null }): TeamDTO {
+  return {
+    id: t.id,
+    code: t.code,
+    name: t.name,
+    category: E.teamCategory.toLabel(t.category),
+    latitude: t.latitude,
+    longitude: t.longitude,
+    availability: E.availability.toLabel(t.availability),
+    ...(t.activeIncident && { assignedIncidentId: t.activeIncident.id }),
+    contactName: t.contactName,
+    contactPhone: t.contactPhone,
+    ...(t.contactEmail && { contactEmail: t.contactEmail }),
+    createdAt: t.createdAt.toISOString(),
+    updatedAt: t.updatedAt.toISOString(),
+  };
+}
+
+export function toAssignmentDTO(
+  a: TeamAssignment & { team: Pick<ResponseTeam, "name" | "category"> },
+): AssignmentDTO {
+  return {
+    id: a.id,
+    teamId: a.teamId,
+    teamName: a.team.name,
+    teamCategory: E.teamCategory.toLabel(a.team.category),
+    method: E.assignmentMethod.toLabel(a.method),
+    assignedAt: a.assignedAt.toISOString(),
+    ...(a.straightLineKm != null && { straightLineKm: a.straightLineKm }),
+    ...(a.routeSource &&
+      a.routeDistanceKm != null && {
+        route: {
+          source: a.routeSource === "OSRM" ? ("osrm" as const) : ("straight-line" as const),
+          distanceKm: a.routeDistanceKm,
+          ...(a.routeDurationMin != null && { durationMin: a.routeDurationMin }),
+        },
+      }),
+    ...(a.releasedAt && { releasedAt: a.releasedAt.toISOString() }),
+    ...(a.releaseReason && { releaseReason: E.releaseReason.toLabel(a.releaseReason) }),
+  };
+}
 
 export type IncidentWithRelations = Prisma.IncidentGetPayload<{ include: typeof incidentInclude }>;
 export type ActivityWithActor = IncidentUpdate & {
@@ -94,10 +150,24 @@ export async function toIncidentDTO(i: IncidentWithRelations): Promise<IncidentD
     verification: E.verification.toLabel(i.verification),
     assignee: toStaffSummary(i.assignee),
     firstResponseAt: i.firstResponseAt?.toISOString() ?? null,
-    resolvedAt: i.resolvedAt?.toISOString() ?? null,
     createdAt: i.createdAt.toISOString(),
     updatedAt: i.updatedAt.toISOString(),
     activity: i.activity.map(toActivityDTO),
+    priority: E.priority.toLabel(i.priority),
+    priorityScore: i.priorityScore,
+    priorityFactors: (i.priorityFactors as PriorityFactorDTO[] | null) ?? [],
+    priorityUpdatedAt: (i.priorityUpdatedAt ?? i.createdAt).toISOString(),
+    ...(i.assignedTeamId && { assignedTeamId: i.assignedTeamId }),
+    assignedTeam: i.assignedTeam ? toTeamDTO({ ...i.assignedTeam, activeIncident: { id: i.id } }) : null,
+    assignments: i.assignments.map(toAssignmentDTO),
+    statusHistory: i.statusChanges.map((s) => ({
+      status: E.status.toLabel(s.toStatus),
+      at: s.changedAt.toISOString(),
+      actor: s.actor?.name ?? (s.toStatus === "REPORTED" ? "Reporter" : "System"),
+    })),
+    ...(i.assignedAt && { assignedAt: i.assignedAt.toISOString() }),
+    ...(i.firstResponseAt && { inProgressAt: i.firstResponseAt.toISOString() }),
+    ...(i.resolvedAt && { resolvedAt: i.resolvedAt.toISOString() }),
   };
 }
 
@@ -121,6 +191,10 @@ export function toPublicIncidentDTO(i: IncidentWithRelations): PublicIncidentDTO
     verification: E.verification.toLabel(i.verification),
     createdAt: i.createdAt.toISOString(),
     updatedAt: i.updatedAt.toISOString(),
+    ...(i.assignedAt && { assignedAt: i.assignedAt.toISOString() }),
+    ...(i.firstResponseAt && { inProgressAt: i.firstResponseAt.toISOString() }),
+    ...(i.resolvedAt && { resolvedAt: i.resolvedAt.toISOString() }),
+    hasResponseTeam: !!i.assignedTeamId,
     activity: i.activity.filter((a) => a.isPublic).map(toPublicActivityDTO),
   };
 }

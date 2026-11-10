@@ -42,11 +42,51 @@ enum Severity {
   CRITICAL
 }
 
+/// Reported → (Pending review) → Assigned → In Progress → Resolved
 enum IncidentStatus {
   REPORTED
   PENDING
+  ASSIGNED
   IN_PROGRESS
   RESOLVED
+}
+
+/// Automatic priority from the transparent weighted score (src/domain/priority.ts).
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TeamCategory {
+  FIRE
+  MEDICAL
+  RESCUE
+  POLICE
+  DISASTER_RELIEF
+}
+
+enum TeamAvailability {
+  AVAILABLE
+  BUSY
+}
+
+enum AssignmentMethod {
+  RECOMMENDED
+  MANUAL
+}
+
+enum ReleaseReason {
+  RESOLVED
+  REASSIGNED
+  UNASSIGNED
+  INCIDENT_DELETED
+}
+
+enum RouteSource {
+  OSRM
+  STRAIGHT_LINE
 }
 
 enum Verification {
@@ -67,7 +107,9 @@ enum ActivityType {
   SEVERITY_CHANGED
   VERIFICATION_CHANGED
   STATUS_CHANGED
+  PRIORITY_CHANGED
   ASSIGNED
+  TEAM_RELEASED
   NOTE
 }
 
@@ -95,6 +137,8 @@ model User {
 
   assignedIncidents Incident[]       @relation("IncidentAssignee")
   activities        IncidentUpdate[]
+  teamAssignments   TeamAssignment[]
+  statusChanges     IncidentStatusChange[]
 }
 
 model Incident {
@@ -136,19 +180,99 @@ model Incident {
   /// Lifecycle timestamps used for response-time analytics.
   firstResponseAt DateTime?
   resolvedAt      DateTime?
+  assignedAt      DateTime?
+
+  /// Automatic prioritization, recalculated on every change and by the escalation job.
+  priority          Priority  @default(LOW)
+  priorityScore     Int       @default(0)
+  /// [{ key, label, points, max, detail }] — explains the score.
+  priorityFactors   Json?
+  priorityUpdatedAt DateTime?
+
+  /// Team currently responding. @unique: a team can hold at most one incident.
+  assignedTeamId String?        @unique @db.Uuid
+  assignedTeam   ResponseTeam?  @relation("ActiveIncident", fields: [assignedTeamId], references: [id], onDelete: Restrict)
   deletedAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   media    IncidentMedia[]
-  activity IncidentUpdate[]
+  activity      IncidentUpdate[]
+  assignments   TeamAssignment[]
+  statusChanges IncidentStatusChange[]
 
   @@index([status, currentSeverity])
   @@index([category])
   @@index([createdAt(sort: Desc)])
   @@index([assigneeId])
   @@index([location], type: Gist)
+  @@index([priority, status])
+}
+
+model ResponseTeam {
+  id           String           @id @default(uuid()) @db.Uuid
+  /// Human-readable ID, e.g. TEAM-004.
+  code         String           @unique
+  name         String           @unique @db.VarChar(80)
+  category     TeamCategory
+  latitude     Float
+  longitude    Float
+  /// Derived from latitude/longitude by trigger (see migration 20261110000200_response_teams).
+  location     Unsupported("geography(Point, 4326)")?
+  availability TeamAvailability @default(AVAILABLE)
+  contactName  String           @db.VarChar(120)
+  contactPhone String           @db.VarChar(30)
+  contactEmail String?          @db.VarChar(200)
+  /// Soft delete keeps assignment history intact.
+  deletedAt    DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  activeIncident Incident?        @relation("ActiveIncident")
+  assignments    TeamAssignment[]
+
+  @@index([category, availability])
+  @@index([location], type: Gist)
+}
+
+/// Every team ↔ incident assignment, kept as history. At most one open
+/// (releasedAt IS NULL) row per team and per incident — enforced by partial
+/// unique indexes in the migration.
+model TeamAssignment {
+  id               String           @id @default(uuid()) @db.Uuid
+  incidentId       String           @db.Uuid
+  incident         Incident         @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  teamId           String           @db.Uuid
+  team             ResponseTeam     @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  method           AssignmentMethod
+  assignedById     String?          @db.Uuid
+  assignedBy       User?            @relation(fields: [assignedById], references: [id], onDelete: SetNull)
+  assignedAt       DateTime         @default(now())
+  /// Haversine distance at assignment time.
+  straightLineKm   Float?
+  routeSource      RouteSource?
+  routeDistanceKm  Float?
+  routeDurationMin Float?
+  releasedAt       DateTime?
+  releaseReason    ReleaseReason?
+
+  @@index([incidentId, assignedAt])
+  @@index([teamId, assignedAt])
+}
+
+/// Explicit status timeline (Reported → Assigned → In Progress → Resolved).
+model IncidentStatusChange {
+  id         String          @id @default(uuid()) @db.Uuid
+  incidentId String          @db.Uuid
+  incident   Incident        @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  fromStatus IncidentStatus?
+  toStatus   IncidentStatus
+  actorId    String?         @db.Uuid
+  actor      User?           @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  changedAt  DateTime        @default(now())
+
+  @@index([incidentId, changedAt])
 }
 
 model IncidentMedia {

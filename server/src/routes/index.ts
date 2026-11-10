@@ -2,6 +2,7 @@ import { Router } from "express";
 import * as admin from "../controllers/admin.controller.js";
 import * as auth from "../controllers/auth.controller.js";
 import * as pub from "../controllers/public.controller.js";
+import * as team from "../controllers/team.controller.js";
 import { COORDINATORS, STAFF, requireAuth, requireRole } from "../middleware/auth.js";
 import {
   loginLimiter,
@@ -21,7 +22,10 @@ import {
  *  self-assign                       ✓          ✓          ✓
  *  assign others                                ✓          ✓
  *  verification / severity                      ✓          ✓
- *  delete, manage users                                    ✓
+ *  view teams, recommendations, routes ✓        ✓          ✓
+ *  add / edit teams, availability               ✓          ✓
+ *  assign / unassign / reassign teams           ✓          ✓
+ *  delete, manage users, delete teams                      ✓
  */
 export const api = Router();
 
@@ -52,6 +56,18 @@ adminRouter.patch("/incidents/:id/assignee", admin.assign); // responders: self-
 adminRouter.patch("/incidents/:id/verification", requireRole(...COORDINATORS), admin.updateVerification);
 adminRouter.patch("/incidents/:id/severity", requireRole(...COORDINATORS), admin.updateSeverity);
 adminRouter.delete("/incidents/:id", requireRole("ADMIN"), admin.remove);
+
+// Response teams & location-based assignment (Round 2)
+adminRouter.get("/teams", team.list);
+adminRouter.get("/teams/:id", team.get);
+adminRouter.post("/teams", requireRole(...COORDINATORS), team.create);
+adminRouter.put("/teams/:id", requireRole(...COORDINATORS), team.update);
+adminRouter.patch("/teams/:id/availability", requireRole(...COORDINATORS), team.setAvailability);
+adminRouter.delete("/teams/:id", requireRole("ADMIN"), team.remove);
+adminRouter.get("/incidents/:id/recommendations", team.recommend);
+adminRouter.get("/incidents/:id/route", team.route);
+adminRouter.post("/incidents/:id/assignments", requireRole(...COORDINATORS), team.assign);
+adminRouter.delete("/incidents/:id/assignments/current", requireRole(...COORDINATORS), team.unassign);
 
 adminRouter.get("/analytics", admin.analytics);
 
