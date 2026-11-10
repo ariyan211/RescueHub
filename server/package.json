@@ -1,0 +1,51 @@
+{
+  "name": "responsehub-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Response Hub emergency incident management API (Express + Prisma + PostGIS + Socket.io)",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:up": "docker compose up -d db",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio"
+  },
+  "prisma": {
+    "seed": "tsx --env-file=.env prisma/seed.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.700.0",
+    "@aws-sdk/s3-presigned-post": "^3.700.0",
+    "@aws-sdk/s3-request-presigner": "^3.700.0",
+    "@prisma/client": "^6.16.0",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "socket.io": "^4.8.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.0.0",
+    "pino-pretty": "^13.0.0",
+    "prisma": "^6.16.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

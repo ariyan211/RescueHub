@@ -1,0 +1,10 @@
+{
+  "description": "A disaster management platform for submitting and tracking incident reports, with an admin dashboard to review severity, update progress, and coordinate response.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
